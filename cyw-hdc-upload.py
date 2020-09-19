@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import sys
+import time
 import serial
 import click
 import struct
@@ -36,6 +38,15 @@ class HCDCommand():
         response = transport.read(len(self.expected))
         if bytearray(self.expected) != response:
             raise UnexpectedResponse(self.command, self.expected, response)
+
+    def dumps(self):
+        def get_address(payload):
+            (address, ) = struct.unpack('<I', payload[:4])
+            return address
+        if self.command == WRITE_RAM:
+            return "Write RAM | 0x{:08X} | {}".format(get_address(self.payload), prettier(self.payload))
+        elif self.command == LAUNCH_RAM:
+            return "Launch RAM | 0x{:08X}".format(get_address(self.payload))
 
 class HCDFirmware():
     """Iterator over the commands of a HCD file"""
@@ -74,17 +85,24 @@ def load_ram_hcd(fw, port, verbose):
     if verbose:
         logging.basicConfig(level=logging.DEBUG)
     else:
-        logging.setLevel(level=logging.INFO)
+        logging.basicConfig(level=logging.INFO)
 
     reset_command = HCDCommand(RESET_CMD, bytearray(), EXPECTED_RESPONSE[RESET_CMD])
 
-    with serial.Serial(port, 115200, timeout=1) as ser:
+    with serial.Serial(port, 115200, timeout=2) as ser:
         transport = Transport(ser)
         commands = HCDFirmware(fw)
         reset_command.send(transport)
         for command in commands:
-            command.send(transport)
-            logging.info("Successfully sent command")
+            try:
+                command.send(transport)
+                logging.debug(command.dumps())
+                logging.debug("Successfully sent command")
+                time.sleep(0.01)
+            except UnexpectedResponse as e:
+                logging.error(e)
+                logging.error(command.dumps())
+                time.sleep(1)
 
 if __name__ == '__main__':
     load_ram_hcd()
